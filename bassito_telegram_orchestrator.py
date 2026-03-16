@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 
 from bassito_drive import upload_to_drive
 import bassito_core
+import bassito_web
 from cta5_controller import CTA5Controller
 
 load_dotenv()
@@ -362,16 +363,29 @@ _bot_instance = None
 
 
 async def post_init(app: Application):
-    """Start the background worker after the bot initializes."""
+    """Start the background worker and web server after the bot initializes."""
     asyncio.create_task(worker(app))
     logger.info("Bassito worker started. Waiting for jobs...")
+
+    # Wire job queue into the web frontend and start uvicorn
+    bassito_web.set_job_queue(job_queue)
+    import uvicorn
+    config = uvicorn.Config(
+        bassito_web.app,
+        host=bassito_web.WEB_HOST,
+        port=bassito_web.WEB_PORT,
+        log_level="warning",
+    )
+    server = uvicorn.Server(config)
+    asyncio.create_task(server.serve())
+    logger.info(f"Web frontend starting on http://{bassito_web.WEB_HOST}:{bassito_web.WEB_PORT}")
 
 
 def main():
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN not set in .env")
     if not ALLOWED_IDS:
-        raise ValueError("ALLOWED_TELEGRAM_IDS not set in .env")
+        logger.warning("ALLOWED_TELEGRAM_IDS not set — Telegram bot commands will be inaccessible")
 
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 

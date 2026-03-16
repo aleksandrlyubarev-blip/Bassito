@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Queue — Bassito{% endblock %}
+
+{% block head %}
+<meta http-equiv="refresh" content="10" />
+{% endblock %}
+
+{% block content %}
+<section class="page-header">
+  <h1>Job Queue</h1>
+  <a href="/" class="btn btn-primary">+ New Job</a>
+</section>
+
+{% if jobs %}
+<section class="card">
+  <table class="jobs-table">
+    <thead>
+      <tr>
+        <th>Job ID</th>
+        <th>Prompt</th>
+        <th>Status</th>
+        <th>Current Phase</th>
+        <th>Submitted</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      <tr class="job-row-{{ job.status.value }}">
+        <td><a href="/jobs/{{ job.id }}">{{ job.id }}</a></td>
+        <td class="prompt-cell">{{ job.prompt[:80] }}{% if job.prompt|length > 80 %}…{% endif %}</td>
+        <td><span class="badge badge-{{ job.status.value }}">{{ job.status.value }}</span></td>
+        <td>
+          {% if job.current_phase %}
+            {{ job.current_phase.emoji }} {{ job.current_phase.description }}
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>{{ job.created_at.strftime('%H:%M:%S') }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% else %}
+<div class="empty-state">
+  <p>No jobs yet. <a href="/">Generate your first episode.</a></p>
+</div>
+{% endif %}
+
+<p class="refresh-notice">Page auto-refreshes every 10 seconds.</p>
+{% endblock %}

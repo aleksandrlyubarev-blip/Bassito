@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}{{ job.id }} — Bassito{% endblock %}
+
+{% block head %}
+{% if refresh %}
+<meta http-equiv="refresh" content="5" />
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<section class="job-header">
+  <div class="job-title-row">
+    <h1>{{ job.id }}</h1>
+    <span class="badge badge-{{ job.status.value }}">{{ job.status.value }}</span>
+  </div>
+  <p class="job-prompt">&ldquo;{{ job.prompt }}&rdquo;</p>
+  <p class="job-meta">Submitted {{ job.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+</section>
+
+<section class="card">
+  <h2>Pipeline Progress</h2>
+  <ol class="phases">
+    {% for phase in all_phases %}
+      {% if job.status.value == 'completed' %}
+        {% set state = 'done' %}
+      {% elif job.status.value == 'failed' and job.current_phase and job.current_phase.step == phase.step %}
+        {% set state = 'error' %}
+      {% elif job.current_phase and job.current_phase.step == phase.step %}
+        {% set state = 'active' %}
+      {% elif job.current_phase and phase.step <= job.current_phase.step and job.status.value != 'queued' %}
+        {% set state = 'done' %}
+      {% else %}
+        {% set state = 'pending' %}
+      {% endif %}
+
+      <li class="phase-row phase-{{ state }}">
+        <span class="phase-icon">{{ phase.emoji }}</span>
+        <span class="phase-label">
+          <strong>Phase {{ phase.step }}</strong> — {{ phase.description }}
+        </span>
+        <span class="phase-status-icon">
+          {% if state == 'done' %}✅
+          {% elif state == 'active' %}⏳
+          {% elif state == 'error' %}❌
+          {% else %}⬜
+          {% endif %}
+        </span>
+      </li>
+    {% endfor %}
+  </ol>
+</section>
+
+{% if job.status.value == 'completed' %}
+<section class="card result-card">
+  <h2>Result</h2>
+  {% if job.drive_link %}
+    <a href="{{ job.drive_link }}" class="btn btn-primary" target="_blank">Open on Google Drive</a>
+  {% elif job.result_path %}
+    <p class="result-path">{{ job.result_path }}</p>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if job.error %}
+<section class="card error-card">
+  <h2>Error</h2>
+  <pre class="error-msg">{{ job.error }}</pre>
+</section>
+{% endif %}
+
+{% if refresh %}
+<p class="refresh-notice">Page auto-refreshes every 5 seconds.</p>
+{% endif %}
+
+<p><a href="/jobs">&larr; Back to queue</a></p>
+{% endblock %}

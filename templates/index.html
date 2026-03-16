@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Bassito — Generate Episode{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <h1>Generate a Bassito Episode</h1>
+  <p class="subtitle">Describe your scene and the pipeline will handle the rest — script, visuals, voice, and final composite.</p>
+</section>
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<section class="card form-card">
+  <form method="post" action="/generate">
+    <div class="field">
+      <label for="prompt">Scene prompt</label>
+      <textarea
+        id="prompt"
+        name="prompt"
+        rows="4"
+        placeholder="e.g. Bassito argues with a cat about the meaning of life"
+        required
+      ></textarea>
+    </div>
+
+    {% if key_required %}
+    <div class="field">
+      <label for="access_key">Access key</label>
+      <input
+        type="password"
+        id="access_key"
+        name="access_key"
+        placeholder="Enter your access key"
+        required
+      />
+    </div>
+    {% else %}
+    <input type="hidden" name="access_key" value="" />
+    {% endif %}
+
+    <button type="submit" class="btn btn-primary">Generate Episode</button>
+  </form>
+</section>
+
+<section class="pipeline-overview">
+  <h2>Pipeline Phases</h2>
+  <ol class="phase-list">
+    <li><span class="phase-icon">📝</span> Script generation</li>
+    <li><span class="phase-icon">🖼️</span> Background creation (Veo/Grok)</li>
+    <li><span class="phase-icon">🎙️</span> Voice synthesis</li>
+    <li><span class="phase-icon">🗣️</span> Lip-sync generation</li>
+    <li><span class="phase-icon">🎬</span> CTA5 render</li>
+    <li><span class="phase-icon">🎞️</span> FFmpeg compositing</li>
+  </ol>
+</section>
+{% endblock %}

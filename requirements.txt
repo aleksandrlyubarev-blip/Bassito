@@ -12,6 +12,12 @@ python-dotenv>=1.0.0
 # Process monitoring (CTA5 health monitor)
 psutil>=5.9.0
 
+# Web frontend
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+jinja2>=3.1.4
+python-multipart>=0.0.9
+
 # UI automation (only needed for CTA5 Strategy C — last resort)
 # pyautogui>=0.9.54
 # pywinauto>=0.6.8
