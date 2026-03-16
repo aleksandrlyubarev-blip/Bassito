@@ -19,8 +19,8 @@ from openai import OpenAI
 
 logger = logging.getLogger("bassito.core")
 
-XAI_API_KEY = os.getenv("XAI_API_KEY", "")
-GROK_MODEL = os.getenv("GROK_MODEL", "grok-3")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+GROK_MODEL = os.getenv("GROK_MODEL", "x-ai/grok-3")
 
 _SCRIPT_SYSTEM_PROMPT = """\
 You are the creative director for Bassito, an animated video series.
@@ -63,10 +63,14 @@ def generate_script(ctx: PipelineContext) -> PipelineContext:
     """Generate episode narration script via Grok (xAI API)."""
     logger.info(f"[{ctx.job_id}] Generating script from prompt: {ctx.prompt[:80]}")
 
-    if not XAI_API_KEY:
-        raise RuntimeError("XAI_API_KEY is not set in environment")
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not set in environment")
 
-    client = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
+    client = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"X-Title": "Bassito"},
+    )
 
     response = client.chat.completions.create(
         model=GROK_MODEL,
