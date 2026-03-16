@@ -2,6 +2,9 @@ name: Unzip and setup repo
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   unzip:
     runs-on: ubuntu-latest
@@ -10,15 +13,7 @@ jobs:
       
       - name: Find and unzip
         run: |
-          echo "=== Files in repo ==="
-          ls -la
-          echo "=== Looking for zip ==="
           ZIP=$(find . -maxdepth 1 -name "*.zip" | head -1)
-          if [ -z "$ZIP" ]; then
-            echo "No ZIP found! Listing all files:"
-            find . -type f
-            exit 1
-          fi
           echo "Found: $ZIP"
           unzip "$ZIP"
           FOLDER=$(unzip -l "$ZIP" | head -5 | tail -1 | awk '{print $4}' | cut -d'/' -f1)
