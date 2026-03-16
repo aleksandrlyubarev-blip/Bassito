@@ -23,7 +23,8 @@ from telegram.ext import (
 from dotenv import load_dotenv
 
 from bassito_drive import upload_to_drive
-# from bassito_core import run_full_pipeline  # Your existing 6-phase module
+import bassito_core
+from cta5_controller import CTA5Controller
 
 load_dotenv()
 
@@ -154,6 +155,8 @@ class PipelineRunner:
 
     def __init__(self, progress_callback: Callable):
         self.on_progress = progress_callback
+        self._contexts: dict[str, bassito_core.PipelineContext] = {}
+        self._cta5: Optional[object] = None
 
     async def run(self, job: Job) -> str:
         """Execute all 6 phases. Returns path to final video."""
@@ -178,19 +181,42 @@ class PipelineRunner:
         return str(output_dir / "final_composite.mov")
 
     async def _execute_phase(self, phase: PipelinePhase, job: Job):
-        """
-        TODO: Replace these stubs with actual calls to your bassito_core functions.
-        
-        Example mapping:
-            PipelinePhase.SCRIPT      → bassito_core.generate_script(job.prompt)
-            PipelinePhase.BACKGROUNDS → bassito_core.generate_backgrounds(script)
-            PipelinePhase.VOICE       → bassito_core.synthesize_voice(script)
-            PipelinePhase.LIPSYNC     → bassito_core.generate_lipsync(voice, avatar)
-            PipelinePhase.RENDER      → cta5_controller.render(project_path, output_path)
-            PipelinePhase.COMPOSITE   → bassito_core.ffmpeg_composite(layers, output_path)
-        """
-        # Stub: simulate work (remove this and wire in your real functions)
-        await asyncio.sleep(2)
+        """Execute a single pipeline phase by delegating to bassito_core."""
+        if phase == PipelinePhase.SCRIPT:
+            ctx = bassito_core.init_context(job.id, job.prompt)
+            self._contexts[job.id] = ctx
+            await asyncio.to_thread(bassito_core.generate_script, ctx)
+
+        elif phase == PipelinePhase.BACKGROUNDS:
+            ctx = self._contexts[job.id]
+            await asyncio.to_thread(bassito_core.generate_backgrounds, ctx)
+
+        elif phase == PipelinePhase.VOICE:
+            ctx = self._contexts[job.id]
+            await asyncio.to_thread(bassito_core.synthesize_voice, ctx)
+
+        elif phase == PipelinePhase.LIPSYNC:
+            ctx = self._contexts[job.id]
+            await asyncio.to_thread(bassito_core.generate_lipsync, ctx)
+
+        elif phase == PipelinePhase.RENDER:
+            ctx = self._contexts[job.id]
+            if self._cta5 is None:
+                self._cta5 = CTA5Controller.auto_detect()
+            project_path = str(ctx.output_dir / "project.cta5")
+            output_path = str(ctx.output_dir / "render.mov")
+            rendered = await self._cta5.render(
+                project_path=project_path,
+                output_path=output_path,
+                audio_path=ctx.voice_path,
+                on_progress=lambda msg: self.on_progress(job, msg),
+            )
+            ctx.render_path = rendered
+
+        elif phase == PipelinePhase.COMPOSITE:
+            ctx = self._contexts[job.id]
+            await asyncio.to_thread(bassito_core.composite_ffmpeg, ctx)
+
         logger.info(f"[{job.id}] Completed phase: {phase.description}")
 
 
