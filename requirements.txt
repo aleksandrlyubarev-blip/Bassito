@@ -6,6 +6,9 @@ google-api-python-client>=2.100.0
 google-auth>=2.23.0
 google-auth-oauthlib>=1.1.0
 
+# xAI / Grok (OpenAI-compatible)
+openai>=1.30.0
+
 # Environment
 python-dotenv>=1.0.0
 

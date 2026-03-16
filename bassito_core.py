@@ -15,7 +15,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from openai import OpenAI
+
 logger = logging.getLogger("bassito.core")
+
+XAI_API_KEY = os.getenv("XAI_API_KEY", "")
+GROK_MODEL = os.getenv("GROK_MODEL", "grok-3")
+
+_SCRIPT_SYSTEM_PROMPT = """\
+You are the creative director for Bassito, an animated video series.
+Given a scene prompt, write a tight, engaging narration script (60-120 seconds when read aloud).
+
+Rules:
+- Write in first person as Bassito's voice
+- Plain narration only — no scene headings, no action lines, no speaker labels
+- Vivid, punchy sentences; short paragraphs
+- End with a memorable closing line
+- Output only the script text, nothing else
+"""
 
 
 @dataclass
@@ -43,17 +60,32 @@ def init_context(job_id: str, prompt: str) -> PipelineContext:
 
 # ── Phase 1: Script Generation ──────────────────────────────────────
 def generate_script(ctx: PipelineContext) -> PipelineContext:
-    """
-    Generate episode script from the prompt using Grok/Gemini.
-    
-    TODO: Wire in your existing script generation logic.
-    Example:
-        response = xai_client.chat(prompt=ctx.prompt, ...)
-        ctx.script = response.text
-    """
-    logger.info(f"[{ctx.job_id}] Generating script from prompt...")
-    # STUB
-    ctx.script = f"[Generated script for: {ctx.prompt}]"
+    """Generate episode narration script via Grok (xAI API)."""
+    logger.info(f"[{ctx.job_id}] Generating script from prompt: {ctx.prompt[:80]}")
+
+    if not XAI_API_KEY:
+        raise RuntimeError("XAI_API_KEY is not set in environment")
+
+    client = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
+
+    response = client.chat.completions.create(
+        model=GROK_MODEL,
+        messages=[
+            {"role": "system", "content": _SCRIPT_SYSTEM_PROMPT},
+            {"role": "user", "content": ctx.prompt},
+        ],
+        temperature=0.85,
+        max_tokens=1024,
+    )
+
+    script = response.choices[0].message.content.strip()
+
+    # Persist to disk so downstream phases can reference it
+    script_path = ctx.output_dir / "script.txt"
+    script_path.write_text(script, encoding="utf-8")
+
+    ctx.script = script
+    logger.info(f"[{ctx.job_id}] Script generated ({len(script)} chars) → {script_path}")
     return ctx
 
 
