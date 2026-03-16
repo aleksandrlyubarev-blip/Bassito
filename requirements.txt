@@ -1,0 +1,17 @@
+# Telegram bot
+python-telegram-bot==21.4
+
+# Google Drive upload (Service Account)
+google-api-python-client>=2.100.0
+google-auth>=2.23.0
+google-auth-oauthlib>=1.1.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# Process monitoring (CTA5 health monitor)
+psutil>=5.9.0
+
+# UI automation (only needed for CTA5 Strategy C — last resort)
+# pyautogui>=0.9.54
+# pywinauto>=0.6.8

@@ -1,0 +1,30 @@
+[Unit]
+Description=Bassito Telegram Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yourusername
+Group=yourusername
+WorkingDirectory=/home/youruser/bassito
+ExecStart=/home/youruser/bassito/venv/bin/python bassito_telegram_orchestrator.py
+Environment=PYTHONUNBUFFERED=1
+
+# Restart policy: auto-restart on failure, but stop if it crashes 5 times in 60s
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Logging
+StandardOutput=append:/home/youruser/bassito/logs/stdout.log
+StandardError=append:/home/youruser/bassito/logs/stderr.log
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/youruser/bassito
+
+[Install]
+WantedBy=multi-user.target
