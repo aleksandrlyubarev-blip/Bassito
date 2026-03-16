@@ -9,18 +9,34 @@ and returns updated context. The orchestrator calls these sequentially.
 TODO: Replace the stub implementations with your actual pipeline logic.
 """
 
+import base64
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from google import genai
+from google.genai import types as genai_types
 from openai import OpenAI
 
 logger = logging.getLogger("bassito.core")
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GROK_MODEL = os.getenv("GROK_MODEL", "x-ai/grok-3")
+IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
+
+# Number of background images to generate per job
+BG_COUNT = int(os.getenv("BG_COUNT", "3"))
+
+_BG_PROMPT_SYSTEM = """\
+You are a visual director for an animated video series called Bassito.
+Given a narration script, extract {n} distinct scene descriptions suitable for background image generation.
+Each description should be cinematic, vivid, and environment-focused (no characters).
+Output exactly {n} lines, one description per line, nothing else.
+"""
 
 _SCRIPT_SYSTEM_PROMPT = """\
 You are the creative director for Bassito, an animated video series.
@@ -94,20 +110,66 @@ def generate_script(ctx: PipelineContext) -> PipelineContext:
 
 
 # ── Phase 2: Background Generation ──────────────────────────────────
+def _extract_scene_prompts(script: str, n: int, openrouter_client: OpenAI) -> list[str]:
+    """Use Grok to derive n cinematic scene descriptions from the script."""
+    system = _BG_PROMPT_SYSTEM.format(n=n)
+    response = openrouter_client.chat.completions.create(
+        model=GROK_MODEL,
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": script},
+        ],
+        temperature=0.7,
+        max_tokens=512,
+    )
+    raw = response.choices[0].message.content.strip()
+    # Split on newlines, drop empty lines, take up to n
+    prompts = [line.strip() for line in raw.splitlines() if line.strip()]
+    return prompts[:n] if len(prompts) >= n else prompts
+
+
 def generate_backgrounds(ctx: PipelineContext) -> PipelineContext:
-    """
-    Generate background images/video via Veo or Grok image API.
-    
-    TODO: Wire in your Veo/Grok background generation.
-    Example:
-        for scene in parse_scenes(ctx.script):
-            bg = veo_client.generate(scene.description)
-            bg.save(ctx.output_dir / f"bg_{scene.index}.png")
-            ctx.background_paths.append(str(bg_path))
-    """
+    """Generate background images via Google Imagen 3."""
     logger.info(f"[{ctx.job_id}] Generating backgrounds...")
-    # STUB
-    ctx.background_paths = [str(ctx.output_dir / "bg_placeholder.png")]
+
+    if not GOOGLE_API_KEY:
+        raise RuntimeError("GOOGLE_API_KEY is not set in environment")
+    if not ctx.script:
+        raise RuntimeError("Phase 2 requires ctx.script (run Phase 1 first)")
+
+    # Step 1: derive scene prompts from the script
+    openrouter_client = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"X-Title": "Bassito"},
+    )
+    scene_prompts = _extract_scene_prompts(ctx.script, BG_COUNT, openrouter_client)
+    if not scene_prompts:
+        raise RuntimeError("Failed to extract scene prompts from script")
+
+    logger.info(f"[{ctx.job_id}] Scene prompts: {scene_prompts}")
+
+    # Step 2: generate each background with Imagen
+    imagen_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+    paths = []
+    for i, prompt in enumerate(scene_prompts):
+        result = imagen_client.models.generate_images(
+            model=IMAGEN_MODEL,
+            prompt=prompt,
+            config=genai_types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio="16:9",
+                output_mime_type="image/png",
+            ),
+        )
+        image_data = result.generated_images[0].image.image_bytes
+        bg_path = ctx.output_dir / f"bg_{i:02d}.png"
+        bg_path.write_bytes(image_data)
+        paths.append(str(bg_path))
+        logger.info(f"[{ctx.job_id}] Background {i} saved → {bg_path}")
+
+    ctx.background_paths = paths
     return ctx
 
 
