@@ -8,13 +8,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Unzip and restructure
+      - name: Find and unzip
         run: |
-          unzip bassito-remote.zip
-          cp -r bassito-remote/* .
-          cp bassito-remote/.env.example .
-          cp bassito-remote/.gitignore .
-          rm -rf bassito-remote/ bassito-remote.zip
+          echo "=== Files in repo ==="
+          ls -la
+          echo "=== Looking for zip ==="
+          ZIP=$(find . -maxdepth 1 -name "*.zip" | head -1)
+          if [ -z "$ZIP" ]; then
+            echo "No ZIP found! Listing all files:"
+            find . -type f
+            exit 1
+          fi
+          echo "Found: $ZIP"
+          unzip "$ZIP"
+          FOLDER=$(unzip -l "$ZIP" | head -5 | tail -1 | awk '{print $4}' | cut -d'/' -f1)
+          cp -r "$FOLDER"/* . 2>/dev/null || true
+          cp "$FOLDER"/.env.example . 2>/dev/null || true
+          cp "$FOLDER"/.gitignore . 2>/dev/null || true
+          rm -rf "$FOLDER" "$ZIP"
           rm -rf .github/workflows/unzip.yml
           
       - name: Commit
