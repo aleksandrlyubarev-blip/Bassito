@@ -27,6 +27,8 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GROK_MODEL = os.getenv("GROK_MODEL", "x-ai/grok-3")
 IMAGEN_MODEL = os.getenv("IMAGEN_MODEL", "imagen-3.0-generate-002")
+TTS_MODEL = os.getenv("TTS_MODEL", "openai/tts-1-hd")
+TTS_VOICE = os.getenv("TTS_VOICE", "fable")
 
 # Number of background images to generate per job
 BG_COUNT = int(os.getenv("BG_COUNT", "3"))
@@ -175,18 +177,32 @@ def generate_backgrounds(ctx: PipelineContext) -> PipelineContext:
 
 # ── Phase 3: Voice Synthesis ────────────────────────────────────────
 def synthesize_voice(ctx: PipelineContext) -> PipelineContext:
-    """
-    Synthesize character voice from the script.
-    
-    TODO: Wire in your TTS pipeline.
-    Example:
-        audio = tts_client.synthesize(ctx.script, voice="bassito")
-        audio.save(ctx.output_dir / "voice.wav")
-        ctx.voice_path = str(audio_path)
-    """
+    """Synthesize character voice from the script via OpenAI TTS (OpenRouter)."""
     logger.info(f"[{ctx.job_id}] Synthesizing voice...")
-    # STUB
-    ctx.voice_path = str(ctx.output_dir / "voice_placeholder.wav")
+
+    if not OPENROUTER_API_KEY:
+        raise RuntimeError("OPENROUTER_API_KEY is not set in environment")
+    if not ctx.script:
+        raise RuntimeError("Phase 3 requires ctx.script (run Phase 1 first)")
+
+    client = OpenAI(
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"X-Title": "Bassito"},
+    )
+
+    response = client.audio.speech.create(
+        model=TTS_MODEL,
+        voice=TTS_VOICE,
+        input=ctx.script,
+        response_format="mp3",
+    )
+
+    voice_path = ctx.output_dir / "voice.mp3"
+    voice_path.write_bytes(response.content)
+
+    ctx.voice_path = str(voice_path)
+    logger.info(f"[{ctx.job_id}] Voice saved → {voice_path}")
     return ctx
 
 
