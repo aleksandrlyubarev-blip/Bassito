@@ -150,3 +150,17 @@ Wire your existing 6-phase pipeline into `bassito_core.py` by implementing `run_
 ## License
 
 Private / All rights reserved.
+
+## Git hooks
+
+Activate the real pre-commit hook with:
+
+```bash
+python scripts/install_hooks.py
+```
+
+The hook will:
+
+- run `cargo check --quiet` for any Rust crates present in the repo
+- run `npm run lint` for any Vue/React packages that expose a `lint` script
+- block commits if staged changes contain API-key-like secrets for OpenAI, Gemini, or xAI credentials
