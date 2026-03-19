@@ -12,6 +12,20 @@ from unittest.mock import patch, MagicMock
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Mock unavailable native/external dependencies before any project imports
+_telegram_mock = MagicMock()
+for _mod in [
+    "telegram", "telegram.ext", "telegram.ext.filters",
+    "dotenv",
+]:
+    sys.modules.setdefault(_mod, MagicMock())
+
+for _mod in [
+    "google", "google.oauth2", "google.oauth2.service_account",
+    "googleapiclient", "googleapiclient.discovery", "googleapiclient.http",
+]:
+    sys.modules.setdefault(_mod, MagicMock())
+
 
 class TestJobQueue:
     """Test the job queue serialization logic."""
