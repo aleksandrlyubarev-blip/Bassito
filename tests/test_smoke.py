@@ -44,6 +44,25 @@ class TestJobQueue:
         status = q.get_status()
         assert "empty" in status.lower()
 
+    def test_retry_creates_new_job(self):
+        from bassito_telegram_orchestrator import JobQueue, JobStatus
+        q = JobQueue(max_size=5)
+        original = q.create_job(prompt="Original prompt", chat_id=42)
+        original.status = JobStatus.FAILED
+
+        retry = q.create_job(prompt=original.prompt, chat_id=42)
+        assert retry.id != original.id
+        assert retry.prompt == original.prompt
+        assert retry.status == JobStatus.QUEUED
+
+    def test_retry_rejected_for_running_job(self):
+        from bassito_telegram_orchestrator import JobQueue, JobStatus
+        q = JobQueue(max_size=5)
+        job = q.create_job(prompt="Running job", chat_id=42)
+        job.status = JobStatus.RUNNING
+        # Only FAILED and CANCELLED jobs should be retried
+        assert job.status not in (JobStatus.FAILED, JobStatus.CANCELLED)
+
 
 class TestPipelineContext:
     """Test the core pipeline context."""

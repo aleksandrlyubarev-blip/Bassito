@@ -343,6 +343,41 @@ async def cmd_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No completed jobs yet.")
 
 
+async def cmd_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        return
+
+    job_id = context.args[0] if context.args else ""
+    if not job_id:
+        await update.message.reply_text("Usage: /retry <job_id>")
+        return
+
+    original = job_queue._jobs.get(job_id)
+    if not original:
+        await update.message.reply_text(f"❌ Job {job_id} not found.")
+        return
+
+    if original.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
+        await update.message.reply_text(
+            f"⚠️ Job {job_id} has status '{original.status.value}' — only failed or cancelled jobs can be retried."
+        )
+        return
+
+    new_job = job_queue.create_job(prompt=original.prompt, chat_id=update.effective_chat.id)
+    try:
+        position = await job_queue.enqueue(new_job)
+        msg = f"🔄 Retrying as job {new_job.id}.\n📝 Prompt: {original.prompt[:200]}"
+        if position > 1:
+            msg += f"\n⏳ Position in queue: {position}"
+        else:
+            msg += "\n🚀 Starting now..."
+        await update.message.reply_text(msg)
+    except asyncio.QueueFull:
+        await update.message.reply_text(
+            f"❌ Queue is full ({MAX_QUEUE_SIZE} jobs). Try again later."
+        )
+
+
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -352,6 +387,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/status — Agent & current job status\n"
         "/queue — View job queue\n"
         "/stop — Cancel current job\n"
+        "/retry <job_id> — Retry a failed or cancelled job\n"
         "/last — Link to last completed video\n"
         "/help — This message"
     )
@@ -379,6 +415,7 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("stop", cmd_stop))
+    app.add_handler(CommandHandler("retry", cmd_retry))
     app.add_handler(CommandHandler("last", cmd_last))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("start", cmd_help))
