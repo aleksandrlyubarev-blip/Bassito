@@ -34,9 +34,13 @@ class PipelineContext:
     final_video_path: Optional[str] = None
 
 
-def init_context(job_id: str, prompt: str) -> PipelineContext:
+def init_context(
+    job_id: str,
+    prompt: str,
+    output_root: Path | None = None,
+) -> PipelineContext:
     """Create a fresh pipeline context and output directory."""
-    output_dir = Path("output") / job_id
+    output_dir = (output_root or Path("output")) / job_id
     output_dir.mkdir(parents=True, exist_ok=True)
     return PipelineContext(job_id=job_id, prompt=prompt, output_dir=output_dir)
 
@@ -162,12 +166,16 @@ PHASES = [
 ]
 
 
-def run_full_pipeline(job_id: str, prompt: str) -> str:
+def run_full_pipeline(
+    job_id: str,
+    prompt: str,
+    output_root: Path | None = None,
+) -> str:
     """
     Run all 6 phases sequentially. Returns path to final video.
     Called by the orchestrator via asyncio.to_thread().
     """
-    ctx = init_context(job_id, prompt)
+    ctx = init_context(job_id, prompt, output_root=output_root)
     
     for phase_fn in PHASES:
         logger.info(f"[{ctx.job_id}] Running phase: {phase_fn.__name__}")
