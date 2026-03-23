@@ -147,6 +147,43 @@ bassito-remote/
 
 Wire your existing 6-phase pipeline into `bassito_core.py` by implementing `run_phase()` for each `PipelinePhase`. The orchestrator calls phases sequentially with progress callbacks — see `PipelineRunner._execute_phase()` in the orchestrator for the integration point.
 
+## PinoCut bridge
+
+Bassito now includes a programmatic bridge for `PinoCut` scene jobs:
+
+- `bridge_shot`
+- `extend`
+- `restyle`
+
+This is intentionally separate from the Telegram bot. `PinoCut` can hand off
+jobs through `bassito_pinocut_bridge.py` as JSON manifests:
+
+```bash
+python bassito_pinocut_bridge.py submit job.json
+python bassito_pinocut_bridge.py submit job.json --run-now
+```
+
+Example request payload:
+
+```json
+{
+  "job_type": "bridge_shot",
+  "prompt": "Create a tense bridge shot between corridor and docking bay",
+  "scene_id": "scene_03",
+  "style_profile": "cinematic dark sci-fi"
+}
+```
+
+Current behavior:
+
+- queue-only mode writes a request manifest for later execution
+- `--run-now` executes the current stubbed visual-generation path and writes a result manifest
+- this gives `PinoCut` a real machine-to-machine contract before the full Bassito production phases are wired in
+
+Production note:
+
+`--run-now` is still a truthful stub bridge, not the final Veo/CTA5/FFmpeg production path. To upgrade it, wire the real generation logic into `bassito_core.py`.
+
 ## License
 
 Private / All rights reserved.
