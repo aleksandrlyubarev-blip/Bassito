@@ -8,7 +8,9 @@ and returns updated context. The orchestrator calls these sequentially.
 
 LongLive-2.0 long-video phase (`generate_long_video_longlive`) and the
 `run_long_video_pipeline` variant live alongside the original 6 phases
-and share the same PipelineContext.
+and share the same PipelineContext. When BASSITO_LONGLIVE_MOCK=1 the
+long-video phase runs against the synthetic mock engine, so the full
+pipeline is exercisable on a free-tier CPU instance.
 """
 
 import asyncio
@@ -18,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from longlive_engine import LongLiveEngine, MultiShotRunner, ShotSpec
+from longlive_engine import ShotSpec, make_engine, make_runner
 
 logger = logging.getLogger("bassito.core")
 
@@ -169,18 +171,17 @@ def generate_long_video_longlive(ctx: PipelineContext) -> PipelineContext:
     """
     LongLive-2.0 autoregressive multi-shot long-video phase.
 
-    Drives the NVFP4 engine on a Blackwell node. Requires:
-      - 2 Blackwell GPUs (NVFP4 model on GPU 0, async VAE decode on GPU 1)
-      - BASSITO_LONGLIVE_WEIGHTS env var pointing at the unpacked checkpoint
+    Drives the NVFP4 engine on a Blackwell node — unless
+    BASSITO_LONGLIVE_MOCK=1 is set, in which case the synthetic mock
+    engine runs in-process so the rest of the pipeline can be exercised
+    on a free-tier CPU instance.
 
     If `ctx.shots` is empty, the whole `ctx.prompt` is treated as one shot.
-    Sync wrapper around the async MultiShotRunner so this phase plugs into
-    the existing sequential PHASES list without changing the runner contract.
     """
     logger.info(f"[{ctx.job_id}] Generating long video with LongLive-2.0...")
     shots = list(ctx.shots) if ctx.shots else [ShotSpec(prompt=ctx.prompt)]
-    engine = LongLiveEngine.get()
-    runner = MultiShotRunner(engine, output_dir=ctx.output_dir)
+    engine = make_engine()
+    runner = make_runner(engine, ctx.output_dir)
 
     async def _drive():
         return await runner.run(ctx.job_id, shots)

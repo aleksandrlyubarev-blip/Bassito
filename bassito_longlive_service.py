@@ -1,10 +1,12 @@
 """
 Bassito LongLive-2.0 HTTP service (FastAPI + SSE).
 
-Stands up on the Blackwell GPU node. The Filmitto control plane
-(romeo_phd) and the bassito Telegram bot both call this service; it is
-the single source of NVFP4 inference and serializes GPU access with an
-asyncio.Lock so concurrent requests never collide on the model.
+Stands up on the Blackwell GPU node (or on any CPU instance when
+BASSITO_LONGLIVE_MOCK=1 is set — see longlive_engine.mock_engine).
+The Filmitto control plane (romeo_phd) and the bassito Telegram bot
+both call this service; it is the single source of NVFP4 inference and
+serializes GPU access with an asyncio.Lock so concurrent requests never
+collide on the model.
 
 Endpoints:
   POST /v1/longlive/generate     submit a multi-shot generation job
@@ -37,9 +39,11 @@ from longlive_engine import (
     BlackwellRequiredError,
     ChunkEvent,
     LongLiveEngine,
-    MultiShotRunner,
     ShotSpec,
     ensure_blackwell,
+    is_mock_enabled,
+    make_engine,
+    make_runner,
 )
 
 logger = logging.getLogger("bassito.longlive.service")
@@ -114,12 +118,23 @@ class JobAccepted(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _engine
-    try:
-        ensure_blackwell()
-        _engine = LongLiveEngine.get()
-        logger.info("LongLive-2.0 engine ready on Blackwell")
-    except BlackwellRequiredError as exc:
-        logger.warning("LongLive-2.0 engine NOT ready: %s", exc)
+    if is_mock_enabled():
+        _engine = make_engine()
+        logger.warning(
+            "BASSITO_LONGLIVE_MOCK=1 — service running with MockLongLiveEngine. "
+            "All generated videos are zero-byte placeholders."
+        )
+    else:
+        try:
+            ensure_blackwell()
+            _engine = make_engine()
+            logger.info("LongLive-2.0 engine ready on Blackwell")
+        except BlackwellRequiredError as exc:
+            logger.warning(
+                "LongLive-2.0 engine NOT ready: %s. "
+                "Set BASSITO_LONGLIVE_MOCK=1 to run in plumbing-only mode.",
+                exc,
+            )
     yield
 
 
@@ -132,7 +147,12 @@ async def health() -> dict:
         "service": "bassito-longlive",
         "engine_loaded": False,
         "blackwell": False,
+        "mock_mode": is_mock_enabled(),
     }
+    if is_mock_enabled():
+        info["engine_loaded"] = _engine is not None
+        info["note"] = "Mock mode — outputs are zero-byte placeholders."
+        return info
     try:
         cap = ensure_blackwell()
         info["blackwell"] = True
@@ -165,7 +185,7 @@ async def _run_job(state: _JobState) -> None:
     try:
         async with _gpu_lock:
             engine = _ensure_engine()
-            runner = MultiShotRunner(engine, output_dir=OUTPUT_ROOT / state.job_id)
+            runner = make_runner(engine, OUTPUT_ROOT / state.job_id)
             async for event in runner.stream(state.job_id, state.shots):
                 await state.queue.put(event)
             state.long_video_path = str(

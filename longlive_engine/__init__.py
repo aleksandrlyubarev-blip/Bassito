@@ -17,12 +17,17 @@ Public surface:
     MultiShotRunner       — drives the engine across a shot list
     SlidingKVCache        — bounded NVFP4 KV window (paper diagram: 5 chunks)
     AsyncVAEDecoder       — async VAE pump on a second GPU
+    MockLongLiveEngine    — CPU/Cloud-Run fallback for UX testing
+    MockMultiShotRunner   — synthetic ChunkEvent emitter for plumbing tests
+    make_engine()         — factory honoring BASSITO_LONGLIVE_MOCK
+    make_runner()         — factory honoring BASSITO_LONGLIVE_MOCK
+    is_mock_enabled()     — truthy when BASSITO_LONGLIVE_MOCK is set
 
 The NVFP4 inference itself requires a Blackwell GPU and the upstream
 NVIDIA LongLive-2.0 weights. The wrapper raises clear errors when
-either is missing; the surrounding plumbing (FastAPI service,
-bassito_core integration, PinoCut bridge, romeo_phd control plane)
-is fully exercisable against the stable types defined here.
+either is missing; the mock backend lets the surrounding plumbing
+(FastAPI service, bassito_core integration, PinoCut bridge, romeo_phd
+control plane) be exercised on free-tier infrastructure.
 """
 from .nvfp4_model import (
     BlackwellRequiredError,
@@ -38,6 +43,13 @@ from .multi_shot_runner import (
     MultiShotRunner,
     ShotSpec,
 )
+from .mock_engine import (
+    MockLongLiveEngine,
+    MockMultiShotRunner,
+    is_mock_enabled,
+    make_engine,
+    make_runner,
+)
 
 __all__ = [
     "AsyncVAEDecoder",
@@ -49,8 +61,13 @@ __all__ = [
     "LatentChunk",
     "LongLiveConfig",
     "LongLiveEngine",
+    "MockLongLiveEngine",
+    "MockMultiShotRunner",
     "MultiShotRunner",
     "ShotSpec",
     "SlidingKVCache",
     "ensure_blackwell",
+    "is_mock_enabled",
+    "make_engine",
+    "make_runner",
 ]
