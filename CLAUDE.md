@@ -214,10 +214,42 @@ async def generate_script(context: PipelineContext) -> PipelineContext:
 
 ---
 
+## Job Search Module (`bassito_jobs/`)
+
+Telegram commands for AI engineering job search:
+
+- `/find_boost_profile <name>` — show profile, then attach CV PDF to (re)build it
+- `/find_boost <name>` — search now, top 10 ranked jobs
+- `/find_boost_watch <name> [hour] [min_score]` — daily digest at HH:00 Asia/Jerusalem
+- `/find_boost_unwatch <name>` — cancel digest
+
+Storage (created on first use, all under `~/.bassito/`):
+
+```
+~/.bassito/profiles/<name>/profile.yaml   # extracted from CV
+~/.bassito/profiles/<name>/cv.pdf         # original
+~/.bassito/profiles/<name>/watch.json     # subscription config
+~/.bassito/jobs/seen.db                   # SQLite: jobs + scores
+```
+
+Pipeline: `scrapers.run_all(profile)` → `store.upsert_jobs` (dedup by URL) →
+`ranker.rank` (keyword pre-filter + Anthropic batched LLM scoring) →
+`store.upsert_scores` → top-N reply / daily digest. Scrapers run concurrently
+with per-source timeout; a failing source logs+skips, never kills the run.
+
+Sources: `alljobs`, `geektime`, `drushim`, `flex` (Workday API). LinkedIn is
+opt-in via `BASSITO_USE_LINKEDIN=true` because of ToS risk and HTML-parsing
+fragility.
+
+Geo: hardcoded whitelist of ~30 Israeli cities + haversine radius around
+Migdal HaEmek (default 60 km). `flex_haifa: true` always allows Flex IL roles
+for internal mobility.
+
 ## Current Status
 
 - **Bot & orchestration**: Fully implemented (`bassito_telegram_orchestrator.py`)
 - **CTA5 automation**: Fully implemented (`cta5_controller.py`)
 - **Google Drive upload**: Fully implemented (`bassito_drive.py`)
 - **Pipeline phases**: All 6 are **stubs** in `bassito_core.py` — primary area for new work
+- **Job search**: Implemented (`bassito_jobs/`); scraper HTML parsers may need periodic touch-ups
 - **Tests**: Smoke tests present; expand coverage when implementing phases

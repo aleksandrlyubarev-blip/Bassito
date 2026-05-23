@@ -1,0 +1,19 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Senior AI/ML Engineer",
+      "externalPath": "/job/Migdal-Haemek-Israel/Senior-AI-ML-Engineer_RC123",
+      "locationsText": "Migdal HaEmek, Israel",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["Full time", "RC123"]
+    },
+    {
+      "title": "Manufacturing Software Engineer",
+      "externalPath": "/job/Haifa-Israel/Manufacturing-Software-Engineer_RC456",
+      "locationsText": "Haifa, Israel",
+      "postedOn": "Posted Today",
+      "bulletFields": ["Full time", "RC456"]
+    }
+  ]
+}
