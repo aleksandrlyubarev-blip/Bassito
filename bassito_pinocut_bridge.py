@@ -6,16 +6,17 @@ Programmatic entrypoint for PinoCut scene jobs that should be executed by
 Bassito's visual pipeline instead of the Telegram bot.
 
 This bridge does not replace the Telegram orchestrator. It offers a typed,
-machine-to-machine contract for the three PinoCut-side generation requests:
+machine-to-machine contract for PinoCut-side generation requests:
 
 - bridge_shot
 - extend
 - restyle
+- long_video        (LongLive-2.0 autoregressive multi-shot long video)
 
 Current implementation is intentionally honest: it writes queue/result
-manifests and can optionally execute the existing stubbed visual-generation
-phase immediately (`--run-now`) so the integration contract exists before the
-full Bassito production pipeline is wired in.
+manifests and can optionally execute the corresponding Bassito phase
+immediately (`--run-now`). The `long_video` job type drives the
+`generate_long_video_longlive` phase, which requires a Blackwell GPU.
 """
 
 from __future__ import annotations
@@ -28,8 +29,9 @@ from pathlib import Path
 from typing import Literal
 
 import bassito_core
+from longlive_engine import ShotSpec
 
-JobType = Literal["bridge_shot", "extend", "restyle"]
+JobType = Literal["bridge_shot", "extend", "restyle", "long_video"]
 
 DEFAULT_QUEUE_ROOT = Path("output") / "pinocut_jobs"
 
@@ -117,10 +119,12 @@ def run_pinocut_job(
     request_path: Path | None = None,
 ) -> PinoCutJobResult:
     """
-    Execute the current stubbed Bassito visual path for a PinoCut job.
+    Execute the appropriate Bassito phase for a PinoCut job.
 
-    This runs the closest available Bassito phase today: background generation,
-    then materializes a result manifest describing the requested visual action.
+    bridge_shot / extend / restyle run the existing stubbed background
+    phase; `long_video` runs the LongLive-2.0 multi-shot phase. The
+    result manifest carries either `planned_background_paths` or
+    `long_video_path` so downstream PinoCut tooling can pick the right field.
     """
     request = request.normalized()
     queue_root.mkdir(parents=True, exist_ok=True)
@@ -132,10 +136,8 @@ def run_pinocut_job(
         _build_visual_prompt(request),
         output_root=queue_root,
     )
-    ctx = bassito_core.generate_backgrounds(ctx)
 
-    artifact_path = ctx.output_dir / f"{request.job_type}.artifact.json"
-    artifact_payload = {
+    artifact_payload: dict[str, object] = {
         "job_id": request.job_id,
         "scene_id": request.scene_id,
         "job_type": request.job_type,
@@ -143,34 +145,57 @@ def run_pinocut_job(
         "style_profile": request.style_profile,
         "source_clip_id": request.source_clip_id,
         "source_clip_path": request.source_clip_path,
-        "planned_background_paths": ctx.background_paths,
-        "note": (
+        "metadata": request.metadata,
+    }
+    warnings: list[str] = []
+    metadata: dict[str, object] = {"execution_mode": "run_now"}
+
+    if request.job_type == "long_video":
+        ctx.shots = [
+            ShotSpec(
+                prompt=request.prompt,
+                reference_clip_path=request.source_clip_path,
+            )
+        ]
+        ctx = bassito_core.generate_long_video_longlive(ctx)
+        artifact_payload["long_video_path"] = ctx.long_video_path
+        artifact_payload["note"] = (
+            "Bassito bridge executed LongLive-2.0 long-video generation."
+        )
+        metadata["long_video_path"] = ctx.long_video_path
+    else:
+        ctx = bassito_core.generate_backgrounds(ctx)
+        artifact_payload["planned_background_paths"] = ctx.background_paths
+        artifact_payload["note"] = (
             "Bassito bridge executed the current stubbed visual-generation phase. "
             "Replace this artifact with real generated media once the production "
             "pipeline is wired into bassito_core."
-        ),
-        "metadata": request.metadata,
-    }
+        )
+        warnings.append(
+            "Bassito executed the stubbed visual bridge path only."
+        )
+        warnings.append(
+            "Wire real Veo/Grok/CTA5 phases into bassito_core for production output."
+        )
+        metadata["planned_background_paths"] = ctx.background_paths
+
+    artifact_path = ctx.output_dir / f"{request.job_type}.artifact.json"
     artifact_path.write_text(json.dumps(artifact_payload, indent=2), encoding="utf-8")
+
+    status = "completed" if request.job_type == "long_video" else "completed_stub"
 
     result_path = completed_dir / f"{request.job_id}.result.json"
     result = PinoCutJobResult(
         job_id=request.job_id,
         scene_id=request.scene_id,
         job_type=request.job_type,
-        status="completed_stub",
+        status=status,
         request_path=str(request_path or ""),
         result_path=str(result_path),
         output_dir=str(ctx.output_dir),
         artifact_path=str(artifact_path),
-        warnings=[
-            "Bassito executed the stubbed visual bridge path only.",
-            "Wire real Veo/Grok/CTA5 phases into bassito_core for production output.",
-        ],
-        metadata={
-            "planned_background_paths": ctx.background_paths,
-            "execution_mode": "run_now_stub",
-        },
+        warnings=warnings,
+        metadata=metadata,
     )
     result_path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
     return result

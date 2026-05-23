@@ -6,14 +6,19 @@ Stub module — wire in your existing 6-phase Bassito pipeline here.
 Each phase function receives the accumulated context from previous phases
 and returns updated context. The orchestrator calls these sequentially.
 
-TODO: Replace the stub implementations with your actual pipeline logic.
+LongLive-2.0 long-video phase (`generate_long_video_longlive`) and the
+`run_long_video_pipeline` variant live alongside the original 6 phases
+and share the same PipelineContext.
 """
 
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+from longlive_engine import LongLiveEngine, MultiShotRunner, ShotSpec
 
 logger = logging.getLogger("bassito.core")
 
@@ -33,6 +38,10 @@ class PipelineContext:
     render_path: Optional[str] = None
     final_video_path: Optional[str] = None
 
+    # LongLive-2.0 long-video pipeline
+    shots: list[ShotSpec] = field(default_factory=list)
+    long_video_path: Optional[str] = None
+
 
 def init_context(
     job_id: str,
@@ -45,7 +54,7 @@ def init_context(
     return PipelineContext(job_id=job_id, prompt=prompt, output_dir=output_dir)
 
 
-# ── Phase 1: Script Generation ──────────────────────────────────────
+# ── Phase 1: Script Generation ────────────────────────────────
 def generate_script(ctx: PipelineContext) -> PipelineContext:
     """
     Generate episode script from the prompt using Grok/Gemini.
@@ -61,7 +70,7 @@ def generate_script(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
-# ── Phase 2: Background Generation ──────────────────────────────────
+# ── Phase 2: Background Generation ──────────────────────────────
 def generate_backgrounds(ctx: PipelineContext) -> PipelineContext:
     """
     Generate background images/video via Veo or Grok image API.
@@ -79,7 +88,7 @@ def generate_backgrounds(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
-# ── Phase 3: Voice Synthesis ────────────────────────────────────────
+# ── Phase 3: Voice Synthesis ───────────────────────────────────
 def synthesize_voice(ctx: PipelineContext) -> PipelineContext:
     """
     Synthesize character voice from the script.
@@ -96,7 +105,7 @@ def synthesize_voice(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
-# ── Phase 4: Lip-Sync Generation ───────────────────────────────────
+# ── Phase 4: Lip-Sync Generation ───────────────────────────────
 def generate_lipsync(ctx: PipelineContext) -> PipelineContext:
     """
     Generate lip-sync animation data from the voice audio.
@@ -113,7 +122,7 @@ def generate_lipsync(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
-# ── Phase 5: CTA5 Render ───────────────────────────────────────────
+# ── Phase 5: CTA5 Render ─────────────────────────────────────
 def render_cta5(ctx: PipelineContext) -> PipelineContext:
     """
     Render the animated scene in CTA5.
@@ -130,7 +139,7 @@ def render_cta5(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
-# ── Phase 6: FFmpeg Compositing ─────────────────────────────────────
+# ── Phase 6: FFmpeg Compositing ────────────────────────────────
 def composite_ffmpeg(ctx: PipelineContext) -> PipelineContext:
     """
     Final compositing: layer backgrounds, render, audio via FFmpeg.
@@ -155,13 +164,48 @@ def composite_ffmpeg(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
-# ── Full Pipeline (sequential) ──────────────────────────────────────
+# ── Phase 7 (alt path): LongLive-2.0 long-video generation ──────────────
+def generate_long_video_longlive(ctx: PipelineContext) -> PipelineContext:
+    """
+    LongLive-2.0 autoregressive multi-shot long-video phase.
+
+    Drives the NVFP4 engine on a Blackwell node. Requires:
+      - 2 Blackwell GPUs (NVFP4 model on GPU 0, async VAE decode on GPU 1)
+      - BASSITO_LONGLIVE_WEIGHTS env var pointing at the unpacked checkpoint
+
+    If `ctx.shots` is empty, the whole `ctx.prompt` is treated as one shot.
+    Sync wrapper around the async MultiShotRunner so this phase plugs into
+    the existing sequential PHASES list without changing the runner contract.
+    """
+    logger.info(f"[{ctx.job_id}] Generating long video with LongLive-2.0...")
+    shots = list(ctx.shots) if ctx.shots else [ShotSpec(prompt=ctx.prompt)]
+    engine = LongLiveEngine.get()
+    runner = MultiShotRunner(engine, output_dir=ctx.output_dir)
+
+    async def _drive():
+        return await runner.run(ctx.job_id, shots)
+
+    result = asyncio.run(_drive())
+    ctx.long_video_path = result.long_video_path
+    return ctx
+
+
+# ── Full Pipeline (sequential) ──────────────────────────────────
 PHASES = [
     generate_script,
     generate_backgrounds,
     synthesize_voice,
     generate_lipsync,
     render_cta5,
+    composite_ffmpeg,
+]
+
+# Long-video variant: script -> LongLive engine -> voice -> ffmpeg mux.
+# Used by /generate_long, the FastAPI service, and the PinoCut long_video job.
+LONG_VIDEO_PHASES = [
+    generate_script,
+    generate_long_video_longlive,
+    synthesize_voice,
     composite_ffmpeg,
 ]
 
@@ -186,3 +230,30 @@ def run_full_pipeline(
     
     logger.info(f"[{ctx.job_id}] Pipeline complete: {ctx.final_video_path}")
     return ctx.final_video_path
+
+
+def run_long_video_pipeline(
+    job_id: str,
+    prompt: str,
+    shots: list[ShotSpec] | None = None,
+    output_root: Path | None = None,
+) -> str:
+    """
+    Long-video pipeline variant. Returns path to the final long video.
+
+    Skips CTA5/lipsync/backgrounds in favor of the LongLive-2.0 engine,
+    then runs voice synthesis and an FFmpeg mux pass.
+    """
+    ctx = init_context(job_id, prompt, output_root=output_root)
+    if shots:
+        ctx.shots = list(shots)
+
+    for phase_fn in LONG_VIDEO_PHASES:
+        logger.info(f"[{ctx.job_id}] Running long-video phase: {phase_fn.__name__}")
+        ctx = phase_fn(ctx)
+
+    final = ctx.long_video_path or ctx.final_video_path
+    if not final:
+        raise RuntimeError("Long-video pipeline produced no output")
+    logger.info(f"[{ctx.job_id}] Long-video pipeline complete: {final}")
+    return final

@@ -12,6 +12,20 @@ python-dotenv>=1.0.0
 # Process monitoring (CTA5 health monitor)
 psutil>=5.9.0
 
+# LongLive-2.0 HTTP service (FastAPI + SSE)
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+sse-starlette>=2.0.0
+pydantic>=2.6.0
+httpx>=0.27.0
+
+# LongLive-2.0 inference (Blackwell only — NVFP4).
+# Uncomment + install on the Blackwell engine node:
+# torch>=2.6.0
+# transformer-engine>=1.10.0
+# nvidia-modelopt>=0.15.0
+# diffusers>=0.27.0
+
 # UI automation (only needed for CTA5 Strategy C — last resort)
 # pyautogui>=0.9.54
 # pywinauto>=0.6.8

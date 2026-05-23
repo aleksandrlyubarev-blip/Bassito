@@ -3,9 +3,14 @@ Bassito Telegram Orchestrator (Improved)
 =========================================
 Remote control for the Bassito video pipeline via Telegram.
 Features: job queue, per-phase progress, error recovery, access control.
+
+LongLive-2.0 long-video jobs are dispatched via /generate_long, which
+proxies to the bassito_longlive_service FastAPI endpoint and streams
+ChunkEvents back to the user's chat.
 """
 
 import asyncio
+import json
 import logging
 import os
 import traceback
@@ -28,13 +33,14 @@ from cta5_controller import CTA5Controller
 
 load_dotenv()
 
-# ── Config ──────────────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ALLOWED_IDS = {int(uid.strip()) for uid in os.getenv("ALLOWED_TELEGRAM_IDS", "").split(",") if uid.strip()}
 MAX_QUEUE_SIZE = int(os.getenv("MAX_QUEUE_SIZE", "10"))
 JOB_TIMEOUT_MINUTES = int(os.getenv("JOB_TIMEOUT_MINUTES", "60"))
+LONGLIVE_SERVICE_URL = os.getenv("BASSITO_LONGLIVE_URL", "http://localhost:8000")
 
-# ── Logging ─────────────────────────────────────────────────────────
+# ── Logging ─────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -46,7 +52,7 @@ logging.basicConfig(
 logger = logging.getLogger("bassito")
 
 
-# ── Data Models ─────────────────────────────────────────────────────
+# ── Data Models ──────────────────────────────────────────
 class JobStatus(Enum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -82,7 +88,7 @@ class Job:
     error: Optional[str] = None
 
 
-# ── Job Queue ───────────────────────────────────────────────────────
+# ── Job Queue ────────────────────────────────────────────
 class JobQueue:
     """Serialized job queue — only one pipeline runs at a time."""
 
@@ -132,7 +138,7 @@ class JobQueue:
             phase_str = f" — {phase.emoji} {phase.description}" if phase else ""
             lines.append(f"▶️ Running: {self._current.id}{phase_str}")
         if self._queue.empty():
-            lines.append("📭 Queue is empty." if not self._current else "No jobs waiting.")
+            lines.append("📬 Queue is empty." if not self._current else "No jobs waiting.")
         else:
             lines.append(f"⏳ {self._queue.qsize()} job(s) waiting.")
         return "\n".join(lines)
@@ -144,7 +150,7 @@ class JobQueue:
         return False
 
 
-# ── Pipeline Runner ─────────────────────────────────────────────────
+# ── Pipeline Runner ────────────────────────────────────────
 class PipelineRunner:
     """
     Wraps the existing Bassito 6-phase pipeline with:
@@ -220,12 +226,12 @@ class PipelineRunner:
         logger.info(f"[{job.id}] Completed phase: {phase.description}")
 
 
-# ── Auth ────────────────────────────────────────────────────────────
+# ── Auth ────────────────────────────────────────────────
 def is_authorized(user_id: int) -> bool:
     return user_id in ALLOWED_IDS
 
 
-# ── Bot Handlers ────────────────────────────────────────────────────
+# ── Bot Handlers ──────────────────────────────────────────
 job_queue = JobQueue()
 
 
@@ -307,6 +313,81 @@ async def cmd_generate(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_generate_long(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Submit a LongLive-2.0 multi-shot long-video job via the HTTP service."""
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+
+    prompt = " ".join(context.args) if context.args else ""
+    if not prompt:
+        await update.message.reply_text(
+            "Usage: /generate_long <prompt>\n"
+            "Example: /generate_long Bassito wanders an abandoned cathedral, three shots"
+        )
+        return
+
+    try:
+        import httpx
+    except ImportError:
+        await update.message.reply_text(
+            "❌ httpx not installed — cannot reach the LongLive service.\n"
+            "Add httpx to requirements.txt and reinstall."
+        )
+        return
+
+    chat_id = update.effective_chat.id
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, read=None)) as client:
+            resp = await client.post(
+                f"{LONGLIVE_SERVICE_URL}/v1/longlive/generate",
+                json={"prompt": prompt, "shots": []},
+            )
+            resp.raise_for_status()
+            accepted = resp.json()
+        await update.message.reply_text(
+            f"🎬 LongLive job {accepted['job_id']} accepted.\nStreaming chunks…"
+        )
+
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "GET", f"{LONGLIVE_SERVICE_URL}{accepted['stream_url']}"
+            ) as stream:
+                async for line in stream.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    payload = line.removeprefix("data:").strip()
+                    if not payload:
+                        continue
+                    try:
+                        data = json.loads(payload)
+                    except json.JSONDecodeError:
+                        data = {"raw": payload}
+                    summary = _summarize_longlive_event(data)
+                    await context.bot.send_message(chat_id=chat_id, text=summary)
+                    if data.get("status") in ("completed", "failed"):
+                        return
+    except Exception as exc:
+        await update.message.reply_text(f"❌ LongLive job failed: {exc}")
+
+
+def _summarize_longlive_event(data: dict) -> str:
+    if "chunk_index" in data:
+        done = data.get("frames_done", "?")
+        total = data.get("frames_total", "?")
+        return (
+            f"📦 chunk {data['chunk_index']} "
+            f"(shot {data.get('shot_id', '?')}) — {done}/{total} frames"
+        )
+    if "status" in data:
+        if data["status"] == "completed":
+            path = data.get("long_video_path", "")
+            return f"✅ Long video ready: {path}"
+        if data["status"] == "failed":
+            return f"❌ LongLive failed: {data.get('error', 'unknown error')}"
+    return f"ℹ️ {data}"
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -383,7 +464,8 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "🤖 Bassito Remote Agent\n\n"
-        "/generate <prompt> — Start a new episode\n"
+        "/generate <prompt> — Start a new episode (6-phase animation)\n"
+        "/generate_long <prompt> — LongLive-2.0 multi-shot long video\n"
         "/status — Agent & current job status\n"
         "/queue — View job queue\n"
         "/stop — Cancel current job\n"
@@ -393,7 +475,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ── Main ────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────
 _bot_instance = None
 
 
@@ -412,6 +494,7 @@ def main():
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
     app.add_handler(CommandHandler("generate", cmd_generate))
+    app.add_handler(CommandHandler("generate_long", cmd_generate_long))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("stop", cmd_stop))
