@@ -108,3 +108,25 @@ class TestDriveUploader:
             assert False, "Should have raised FileNotFoundError"
         except FileNotFoundError:
             pass
+
+
+class TestJobSearchModule:
+    """Smoke checks for the /find_boost feature."""
+
+    def test_imports(self):
+        import bassito_jobs
+        assert hasattr(bassito_jobs, "run_search")
+        assert hasattr(bassito_jobs, "load_profile")
+
+    def test_orchestrator_registers_find_boost_handlers(self):
+        # Just check the handler functions exist and are importable.
+        from bassito_telegram_orchestrator import (
+            cmd_find_boost,
+            cmd_find_boost_profile,
+            cmd_find_boost_unwatch,
+            cmd_find_boost_watch,
+            cmd_receive_cv,
+        )
+        for h in (cmd_find_boost, cmd_find_boost_profile, cmd_find_boost_unwatch,
+                  cmd_find_boost_watch, cmd_receive_cv):
+            assert callable(h)

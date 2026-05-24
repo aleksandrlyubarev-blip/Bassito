@@ -30,6 +30,8 @@ from dotenv import load_dotenv
 from bassito_drive import upload_to_drive
 import bassito_core
 from cta5_controller import CTA5Controller
+import bassito_jobs
+from bassito_jobs import scheduler as jobs_scheduler
 
 load_dotenv()
 
@@ -471,8 +473,158 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/stop — Cancel current job\n"
         "/retry <job_id> — Retry a failed or cancelled job\n"
         "/last — Link to last completed video\n"
-        "/help — This message"
+        "\n— Job Search —\n"
+        "/find_boost_profile <name> — Show profile, then attach CV PDF to (re)build it\n"
+        "/find_boost <name> — Search AI engineering jobs now (top 10)\n"
+        "/find_boost_watch <name> [HH] [min_score] — Daily digest at hour HH\n"
+        "/find_boost_unwatch <name> — Cancel digest\n"
+        "\n/help — This message"
     )
+
+
+# ── Job Search Handlers ───────────────────────────────────
+_pending_cv_uploads: dict[int, str] = {}  # chat_id -> profile name
+
+
+async def cmd_find_boost_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+    name = context.args[0] if context.args else "default"
+    existing = bassito_jobs.load_profile(name)
+    chat_id = update.effective_chat.id
+    if existing:
+        summary = (
+            f"📇 Profile `{name}`:\n"
+            f"role: {existing.current_role}\n"
+            f"years: {existing.years_experience}\n"
+            f"skills: {', '.join(existing.skills[:12])}\n"
+            f"seniority: {', '.join(existing.seniority)}\n"
+            f"include: {', '.join(existing.include_keywords[:8])}\n"
+            f"sources: {', '.join(existing.sources_enabled)}\n\n"
+            "Attach a CV PDF to overwrite this profile."
+        )
+        await update.message.reply_text(summary, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(
+            f"📂 No profile `{name}` yet. Attach a CV PDF and I'll build it."
+        )
+    _pending_cv_uploads[chat_id] = name
+
+
+async def cmd_receive_cv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        return
+    chat_id = update.effective_chat.id
+    name = _pending_cv_uploads.get(chat_id)
+    if not name:
+        return  # ignore PDFs outside the /find_boost_profile flow
+
+    doc = update.message.document
+    if not doc or (doc.mime_type and "pdf" not in doc.mime_type.lower()):
+        await update.message.reply_text("⚠️ Send a PDF, not another file type.")
+        return
+
+    from bassito_jobs.profile import extract_profile_from_pdf, profile_dir, save_profile
+
+    out_dir = profile_dir(name)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cv_path = out_dir / "cv.pdf"
+    tg_file = await doc.get_file()
+    await tg_file.download_to_drive(custom_path=str(cv_path))
+    await update.message.reply_text(f"📥 Saved CV to {cv_path}. Extracting profile…")
+
+    try:
+        profile = await asyncio.to_thread(extract_profile_from_pdf, name, cv_path)
+        save_profile(profile)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("CV extraction failed")
+        await update.message.reply_text(f"❌ CV extraction failed: {e}")
+        return
+    finally:
+        _pending_cv_uploads.pop(chat_id, None)
+
+    await update.message.reply_text(
+        f"✅ Profile `{name}` saved.\n"
+        f"role: {profile.current_role}\n"
+        f"skills: {', '.join(profile.skills[:12])}\n\n"
+        f"Now try: /find_boost {name}",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_find_boost(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+    name = context.args[0] if context.args else "default"
+    chat_id = update.effective_chat.id
+    bot = context.bot
+
+    async def progress(msg: str):
+        try:
+            await bot.send_message(chat_id=chat_id, text=msg)
+        except Exception:  # noqa: BLE001
+            logger.exception("failed to send progress")
+
+    try:
+        result = await bassito_jobs.run_search(name, progress=progress, top_n=10)
+    except FileNotFoundError as e:
+        await update.message.reply_text(str(e))
+        return
+    except Exception as e:  # noqa: BLE001
+        logger.exception("find_boost failed")
+        await update.message.reply_text(f"❌ Search failed: {e}")
+        return
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=result.format_telegram(limit=10),
+        parse_mode="Markdown",
+        disable_web_page_preview=True,
+    )
+
+
+async def cmd_find_boost_watch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+    args = context.args or []
+    name = args[0] if args else "default"
+    hour = int(args[1]) if len(args) > 1 else None
+    min_score = int(args[2]) if len(args) > 2 else None
+
+    profile = bassito_jobs.load_profile(name)
+    if profile is None:
+        await update.message.reply_text(
+            f"❌ No profile `{name}`. Upload a CV via /find_boost_profile {name} first."
+        )
+        return
+
+    cron = f"0 {hour} * * *" if hour is not None else None
+    jobs_scheduler.add_watch(
+        context.bot, name, update.effective_chat.id,
+        cron=cron, min_score=min_score,
+    )
+    saved = jobs_scheduler.load_watch(name) or {}
+    await update.message.reply_text(
+        f"📬 Watching `{name}` — daily digest at cron `{saved.get('cron')}`,"
+        f" min score {saved.get('min_score')}.",
+        parse_mode="Markdown",
+    )
+
+
+async def cmd_find_boost_unwatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+    name = context.args[0] if context.args else "default"
+    removed = jobs_scheduler.remove_watch(name)
+    jobs_scheduler.unregister(name)
+    if removed:
+        await update.message.reply_text(f"🛑 Stopped watching `{name}`.", parse_mode="Markdown")
+    else:
+        await update.message.reply_text(f"_No watch for `{name}`._", parse_mode="Markdown")
 
 
 # ── Main ────────────────────────────────────────────────
@@ -482,6 +634,10 @@ _bot_instance = None
 async def post_init(app: Application):
     """Start the background worker after the bot initializes."""
     asyncio.create_task(worker(app))
+    try:
+        await jobs_scheduler.start(app)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("job-search scheduler failed to start: %s", e)
     logger.info("Bassito worker started. Waiting for jobs...")
 
 
@@ -502,6 +658,11 @@ def main():
     app.add_handler(CommandHandler("last", cmd_last))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("start", cmd_help))
+    app.add_handler(CommandHandler("find_boost", cmd_find_boost))
+    app.add_handler(CommandHandler("find_boost_profile", cmd_find_boost_profile))
+    app.add_handler(CommandHandler("find_boost_watch", cmd_find_boost_watch))
+    app.add_handler(CommandHandler("find_boost_unwatch", cmd_find_boost_unwatch))
+    app.add_handler(MessageHandler(filters.Document.PDF, cmd_receive_cv))
 
     logger.info("Bassito Telegram bot starting...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
