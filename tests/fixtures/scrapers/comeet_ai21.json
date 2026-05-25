@@ -1,0 +1,22 @@
+[
+  {
+    "uid": "11.A1.001",
+    "name": "Staff Research Engineer, LLM",
+    "url_comeet_hosted_page": "https://www.comeet.com/jobs/ai21/11.A1.001",
+    "url_active_page": "https://www.ai21.com/jobs/11.A1.001",
+    "location": {"name": "Tel Aviv", "city": "Tel Aviv", "country": "Israel"},
+    "details": {
+      "job_description": "<p>Lead LLM training at scale.</p>",
+      "job_requirements": "<p>PhD or 5y+ experience, PyTorch, distributed training.</p>"
+    },
+    "time_updated": 1716100000
+  },
+  {
+    "uid": "11.A1.002",
+    "name": "Office Manager",
+    "url_comeet_hosted_page": "https://www.comeet.com/jobs/ai21/11.A1.002",
+    "location": {"name": "Tel Aviv", "city": "Tel Aviv", "country": "Israel"},
+    "details": {"job_description": "Office admin role", "job_requirements": ""},
+    "time_updated": 1716200000
+  }
+]

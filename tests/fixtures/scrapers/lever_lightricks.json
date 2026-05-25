@@ -1,0 +1,20 @@
+[
+  {
+    "id": "abc-123",
+    "text": "Senior ML Engineer",
+    "hostedUrl": "https://jobs.lever.co/lightricks/abc-123",
+    "applyUrl": "https://jobs.lever.co/lightricks/abc-123/apply",
+    "categories": {"location": "Jerusalem, Israel", "team": "ML", "commitment": "Full-time"},
+    "descriptionPlain": "Train and deploy generative models for our creative apps.",
+    "lists": [{"text": "Python, PyTorch, diffusion models"}],
+    "createdAt": 1716000000000
+  },
+  {
+    "id": "def-456",
+    "text": "Frontend Engineer",
+    "hostedUrl": "https://jobs.lever.co/lightricks/def-456",
+    "categories": {"location": "Tel Aviv, Israel"},
+    "descriptionPlain": "React, TypeScript work.",
+    "lists": []
+  }
+]

@@ -15,6 +15,9 @@ from .geektime import GeektimeScraper
 from .drushim import DrushimScraper
 from .flex import FlexCareersScraper
 from .linkedin import LinkedInScraper
+from .greenhouse import GreenhouseScraper
+from .lever import LeverScraper
+from .comeet import ComeetScraper
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,12 @@ def all_scrapers(profile: Profile) -> list[BaseScraper]:
         out.append(DrushimScraper())
     if "flex" in enabled:
         out.append(FlexCareersScraper())
+    if "greenhouse" in enabled:
+        out.append(GreenhouseScraper())
+    if "lever" in enabled:
+        out.append(LeverScraper())
+    if "comeet" in enabled:
+        out.append(ComeetScraper())
     if "linkedin" in enabled and os.getenv("BASSITO_USE_LINKEDIN", "false").lower() == "true":
         out.append(LinkedInScraper())
     return out
@@ -79,6 +88,9 @@ __all__ = [
     "DrushimScraper",
     "FlexCareersScraper",
     "LinkedInScraper",
+    "GreenhouseScraper",
+    "LeverScraper",
+    "ComeetScraper",
     "all_scrapers",
     "run_all",
 ]

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 PROFILES_ROOT = Path.home() / ".bassito" / "profiles"
 
-DEFAULT_SOURCES = ["alljobs", "geektime", "drushim", "flex"]
+DEFAULT_SOURCES = ["alljobs", "geektime", "drushim", "flex", "greenhouse", "lever", "comeet"]
 
 CV_EXTRACTION_PROMPT = """You extract a structured job-matching profile from a CV.
 

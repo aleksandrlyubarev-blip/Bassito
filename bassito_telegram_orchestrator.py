@@ -476,6 +476,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "\n— Job Search —\n"
         "/find_boost_profile <name> — Show profile, then attach CV PDF to (re)build it\n"
         "/find_boost <name> — Search AI engineering jobs now (top 10)\n"
+        "/find_boost_top <name> [min_score] — Show stored top jobs (no rescrape)\n"
         "/find_boost_watch <name> [HH] [min_score] — Daily digest at hour HH\n"
         "/find_boost_unwatch <name> — Cancel digest\n"
         "\n/help — This message"
@@ -627,6 +628,38 @@ async def cmd_find_boost_unwatch(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text(f"_No watch for `{name}`._", parse_mode="Markdown")
 
 
+async def cmd_find_boost_top(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show top stored jobs for a profile without re-scraping."""
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+    args = context.args or []
+    name = args[0] if args else "default"
+    min_score = int(args[1]) if len(args) > 1 else 0
+
+    from bassito_jobs.store import top_for_profile
+    top = await top_for_profile(name, min_score=min_score, limit=10)
+    if not top:
+        await update.message.reply_text(
+            f"_No stored jobs for `{name}` ≥ {min_score}. Run /find_boost {name} first._",
+            parse_mode="Markdown",
+        )
+        return
+
+    lines = [f"🏆 *Top stored — {name}* (≥{min_score})"]
+    for i, s in enumerate(top, start=1):
+        j = s.job
+        loc = f" · {j.location}" if j.location else ""
+        lines.append(
+            f"{i}. *{s.score}* — [{j.title}]({j.url})\n"
+            f"   {j.company or 'unknown'}{loc} · _{j.source}_\n"
+            f"   {s.rationale}".rstrip()
+        )
+    await update.message.reply_text(
+        "\n\n".join(lines), parse_mode="Markdown", disable_web_page_preview=True,
+    )
+
+
 # ── Main ────────────────────────────────────────────────
 _bot_instance = None
 
@@ -662,6 +695,7 @@ def main():
     app.add_handler(CommandHandler("find_boost_profile", cmd_find_boost_profile))
     app.add_handler(CommandHandler("find_boost_watch", cmd_find_boost_watch))
     app.add_handler(CommandHandler("find_boost_unwatch", cmd_find_boost_unwatch))
+    app.add_handler(CommandHandler("find_boost_top", cmd_find_boost_top))
     app.add_handler(MessageHandler(filters.Document.PDF, cmd_receive_cv))
 
     logger.info("Bassito Telegram bot starting...")

@@ -237,9 +237,21 @@ Pipeline: `scrapers.run_all(profile)` → `store.upsert_jobs` (dedup by URL) →
 `store.upsert_scores` → top-N reply / daily digest. Scrapers run concurrently
 with per-source timeout; a failing source logs+skips, never kills the run.
 
-Sources: `alljobs`, `geektime`, `drushim`, `flex` (Workday API). LinkedIn is
-opt-in via `BASSITO_USE_LINKEDIN=true` because of ToS risk and HTML-parsing
-fragility.
+Sources:
+- HTML scrapers (fragile): `alljobs`, `geektime`, `drushim`
+- Official JSON APIs (stable): `flex` (Workday), `greenhouse`, `lever`, `comeet`
+- Opt-in via `BASSITO_USE_LINKEDIN=true`: `linkedin` (ToS risk)
+
+Tune ATS targets via env: `BASSITO_GREENHOUSE_BOARDS=board1,board2`,
+`BASSITO_LEVER_COMPANIES=co1,co2`, `BASSITO_COMEET_COMPANIES=token1=Name1,token2=Name2`.
+
+### CLI (no Telegram)
+
+```
+python -m bassito_jobs romeoflexvision               # run search, print top 10
+python -m bassito_jobs romeoflexvision --top-only     # show stored top, no rescrape
+python -m bassito_jobs romeoflexvision --source flex --source greenhouse
+```
 
 Geo: hardcoded whitelist of ~30 Israeli cities + haversine radius around
 Migdal HaEmek (default 60 km). `flex_haifa: true` always allows Flex IL roles

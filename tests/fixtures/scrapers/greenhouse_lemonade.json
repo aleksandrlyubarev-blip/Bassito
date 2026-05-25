@@ -1,0 +1,20 @@
+{
+  "jobs": [
+    {
+      "id": 4001,
+      "title": "Senior AI Engineer",
+      "absolute_url": "https://boards.greenhouse.io/lemonade/jobs/4001",
+      "location": {"name": "Tel Aviv, Israel"},
+      "content": "<p>Build LLM features. PyTorch, MLOps required.</p>",
+      "updated_at": "2026-05-20T10:00:00Z"
+    },
+    {
+      "id": 4002,
+      "title": "Backend Engineer",
+      "absolute_url": "https://boards.greenhouse.io/lemonade/jobs/4002",
+      "location": {"name": "Remote, Israel"},
+      "content": "<ul><li>Python</li><li>FastAPI</li></ul>",
+      "updated_at": "2026-05-22T10:00:00Z"
+    }
+  ]
+}
