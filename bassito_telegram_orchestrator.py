@@ -390,6 +390,47 @@ def _summarize_longlive_event(data: dict) -> str:
     return f"ℹ️ {data}"
 
 
+async def cmd_generate_local(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Run the local M5 (Apple Silicon) image-to-video pipeline.
+
+    Ideogram 4 keyframe -> Wan 2.1 / LTX-Video / HunyuanVideo I2V, entirely on
+    the host Mac. Runs inline (not via the CTA5 queue) and uploads the result.
+    """
+    if not is_authorized(update.effective_user.id):
+        await update.message.reply_text("⛔ Access denied.")
+        return
+
+    prompt = " ".join(context.args) if context.args else ""
+    if not prompt:
+        await update.message.reply_text(
+            "Usage: /generate_local <prompt> [| <motion prompt>]\n"
+            "Example: /generate_local Bassito on a neon rooftop | slow dolly-in, "
+            "rain falling"
+        )
+        return
+
+    keyframe_prompt, _, motion_prompt = prompt.partition("|")
+    keyframe_prompt = keyframe_prompt.strip()
+    motion_prompt = motion_prompt.strip() or None
+
+    job = job_queue.create_job(prompt=keyframe_prompt, chat_id=update.effective_chat.id)
+    await update.message.reply_text(
+        f"🍎 M5 local job {job.id} starting — Ideogram 4 keyframe → I2V…"
+    )
+    try:
+        video_path = await asyncio.to_thread(
+            bassito_core.run_m5_local_pipeline, job.id, keyframe_prompt, motion_prompt
+        )
+        await update.message.reply_text("☁️ Uploading to Google Drive...")
+        drive_link = await asyncio.to_thread(upload_to_drive, video_path)
+        job.status = JobStatus.COMPLETED
+        await update.message.reply_text(f"🎉 Done!\n📎 {drive_link}\nJob: {job.id}")
+    except Exception as exc:
+        job.status = JobStatus.FAILED
+        job.error = str(exc)
+        await update.message.reply_text(f"❌ M5 local job {job.id} failed:\n{exc}")
+
+
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(update.effective_user.id):
         return
@@ -468,6 +509,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 Bassito Remote Agent\n\n"
         "/generate <prompt> — Start a new episode (6-phase animation)\n"
         "/generate_long <prompt> — LongLive-2.0 multi-shot long video\n"
+        "/generate_local <prompt> [| motion] — Local M5 Ideogram 4 → I2V\n"
         "/status — Agent & current job status\n"
         "/queue — View job queue\n"
         "/stop — Cancel current job\n"
@@ -651,6 +693,7 @@ def main():
 
     app.add_handler(CommandHandler("generate", cmd_generate))
     app.add_handler(CommandHandler("generate_long", cmd_generate_long))
+    app.add_handler(CommandHandler("generate_local", cmd_generate_local))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("stop", cmd_stop))

@@ -70,7 +70,7 @@ PipelineRunner                                               ├── current_p
 - **`Job`** dataclass: full job state (id, prompt, chat_id, status, phase, timestamps)
 - **`JobQueue`**: serialized queue — only one job runs at a time
 - **`PipelineRunner`**: executes phases sequentially with progress callbacks and timeouts
-- **Bot commands**: `/generate`, `/status`, `/queue`, `/stop`, `/retry`, `/last`, `/help`
+- **Bot commands**: `/generate`, `/generate_long`, `/generate_local`, `/status`, `/queue`, `/stop`, `/retry`, `/last`, `/help`
 
 ### `bassito_core.py` — Pipeline Implementation
 - **`PipelineContext`** dataclass: state object passed between pipeline phases
@@ -92,6 +92,29 @@ Three strategies, auto-detected in priority order:
 - **`CTA5Controller.auto_detect()`**: factory that picks the best available strategy
 - **`CTA5Controller.force(strategy)`**: force a specific strategy
 - **`CTA5HealthMonitor`**: monitors the CTA5 process, restarts if needed
+
+### `m5_video_engine/` — Local M5 Image-to-Video (Apple Silicon)
+
+A two-stage, strictly-sequential local pipeline for MacBook Pro M5 Pro (24 GB
+unified memory). Mirrors the `longlive_engine/` pattern: typed, lazy-loading,
+hardware-gated; everything except the model load/sampling calls is exercisable
+without a Mac.
+
+| Module | Purpose |
+|--------|---------|
+| `unified_memory.py` | `MemoryBudget` / `ModelFootprint` / `OffloadPlan` — sizes the ~18-20 GB usable pool and decides when stages must offload. `ensure_apple_silicon()` gates the host. |
+| `ideogram4.py` | `Ideogram4KeyframeGenerator` (nf4, 9.3B DiT + Qwen3-VL-8B encoder) renders the *perfect first frame*. `JSONPrompt` / `BoundingBox` / `TextElement` give deterministic layout, HEX color and typography control. |
+| `i2v_models.py` | `BaseI2VBackend` strategy + `select_backend`/`force_backend` factory: Wan 2.1 14B (6-bit SVDQuant), Wan 2.1 1.3B, LTX-Video 2.3 (native MLX), HunyuanVideo 1.5 (Wan2GP). Highest-quality backend that fits the budget wins. |
+| `i2v_pipeline.py` | `M5VideoPipeline` orchestrates keyframe → **offload** → animate. Ideogram 4 and a heavy I2V model cannot co-exist in 24 GB, so stage 1 is unloaded before stage 2 loads. |
+
+Why offload: a 9.3B keyframe model + a 14B I2V model exceed ~18 GB usable, so
+the pipeline is strictly sequential with aggressive memory offloading — the
+defining characteristic of local I2V on this hardware. Ideogram 4's prompt
+fidelity makes it an ideal structural keyframe generator (I2V models extrapolate
+keyframe defects as real geometry, producing "AI slop").
+
+Wired into `bassito_core.py` via `generate_video_m5_local()` / `M5_LOCAL_PHASES`
+/ `run_m5_local_pipeline()`, and exposed over Telegram as `/generate_local`.
 
 ### `bassito_drive.py` — Google Drive Upload
 - Uses **Service Account** (no OAuth prompts, fully headless)
@@ -251,5 +274,6 @@ for internal mobility.
 - **CTA5 automation**: Fully implemented (`cta5_controller.py`)
 - **Google Drive upload**: Fully implemented (`bassito_drive.py`)
 - **Pipeline phases**: All 6 are **stubs** in `bassito_core.py` — primary area for new work
+- **Local M5 I2V engine**: `m5_video_engine/` implemented (memory planning, JSON prompting, backend selection, offload orchestration); model load/sampling are gated integration points awaiting the open-weights checkpoints on a Mac
 - **Job search**: Implemented (`bassito_jobs/`); scraper HTML parsers may need periodic touch-ups
 - **Tests**: Smoke tests present; expand coverage when implementing phases

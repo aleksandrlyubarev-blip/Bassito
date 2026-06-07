@@ -9,6 +9,10 @@ and returns updated context. The orchestrator calls these sequentially.
 LongLive-2.0 long-video phase (`generate_long_video_longlive`) and the
 `run_long_video_pipeline` variant live alongside the original 6 phases
 and share the same PipelineContext.
+
+The local Apple Silicon image-to-video phase (`generate_video_m5_local`) and
+the `run_m5_local_pipeline` variant drive the M5VideoPipeline (Ideogram 4 ->
+I2V) on a MacBook Pro M5 Pro, also sharing the PipelineContext.
 """
 
 import asyncio
@@ -19,6 +23,7 @@ from pathlib import Path
 from typing import Optional
 
 from longlive_engine import LongLiveEngine, MultiShotRunner, ShotSpec
+from m5_video_engine import M5VideoConfig, M5VideoPipeline
 
 logger = logging.getLogger("bassito.core")
 
@@ -41,6 +46,11 @@ class PipelineContext:
     # LongLive-2.0 long-video pipeline
     shots: list[ShotSpec] = field(default_factory=list)
     long_video_path: Optional[str] = None
+
+    # Local M5 (Apple Silicon) image-to-video pipeline
+    motion_prompt: Optional[str] = None
+    keyframe_path: Optional[str] = None
+    i2v_video_path: Optional[str] = None
 
 
 def init_context(
@@ -190,6 +200,35 @@ def generate_long_video_longlive(ctx: PipelineContext) -> PipelineContext:
     return ctx
 
 
+# ── Phase 7 (alt path): local M5 Apple Silicon image-to-video ───────────
+def generate_video_m5_local(ctx: PipelineContext) -> PipelineContext:
+    """
+    Local image-to-video on a MacBook Pro M5 Pro (24 GB unified memory).
+
+    Drives the M5VideoPipeline: Ideogram 4 (nf4) renders a perfect keyframe,
+    the keyframe model is offloaded, then a quantized I2V backend
+    (Wan 2.1 / LTX-Video / HunyuanVideo 1.5) animates it. Requires:
+      - an Apple Silicon Mac (macOS arm64)
+      - BASSITO_IDEOGRAM4_WEIGHTS + a backend weights env var
+        (e.g. BASSITO_WAN21_WEIGHTS / BASSITO_LTXVIDEO_WEIGHTS)
+
+    `ctx.motion_prompt` describes the motion; if unset, the keyframe prompt is
+    reused. Sets `ctx.keyframe_path` and `ctx.i2v_video_path`.
+    """
+    logger.info(f"[{ctx.job_id}] Generating local M5 image-to-video...")
+    pipeline = M5VideoPipeline(M5VideoConfig.from_env())
+    motion_prompt = ctx.motion_prompt or ctx.prompt
+    result = pipeline.run(
+        ctx.job_id,
+        prompt=ctx.prompt,
+        motion_prompt=motion_prompt,
+        output_dir=ctx.output_dir,
+    )
+    ctx.keyframe_path = result.keyframe_path
+    ctx.i2v_video_path = result.video_path
+    return ctx
+
+
 # ── Full Pipeline (sequential) ──────────────────────────────────
 PHASES = [
     generate_script,
@@ -205,6 +244,15 @@ PHASES = [
 LONG_VIDEO_PHASES = [
     generate_script,
     generate_long_video_longlive,
+    synthesize_voice,
+    composite_ffmpeg,
+]
+
+# Local M5 variant: script -> Ideogram 4 keyframe + I2V -> voice -> ffmpeg mux.
+# Used by /generate_local; runs entirely on a MacBook Pro M5 Pro.
+M5_LOCAL_PHASES = [
+    generate_script,
+    generate_video_m5_local,
     synthesize_voice,
     composite_ffmpeg,
 ]
@@ -256,4 +304,32 @@ def run_long_video_pipeline(
     if not final:
         raise RuntimeError("Long-video pipeline produced no output")
     logger.info(f"[{ctx.job_id}] Long-video pipeline complete: {final}")
+    return final
+
+
+def run_m5_local_pipeline(
+    job_id: str,
+    prompt: str,
+    motion_prompt: str | None = None,
+    output_root: Path | None = None,
+) -> str:
+    """
+    Local M5 image-to-video pipeline. Returns the path to the final video.
+
+    Runs Ideogram 4 -> I2V on Apple Silicon, then voice synthesis and an
+    FFmpeg mux pass. `motion_prompt` (optional) describes the motion the I2V
+    backend extrapolates; if omitted, the keyframe prompt is reused.
+    """
+    ctx = init_context(job_id, prompt, output_root=output_root)
+    if motion_prompt:
+        ctx.motion_prompt = motion_prompt
+
+    for phase_fn in M5_LOCAL_PHASES:
+        logger.info(f"[{ctx.job_id}] Running M5 local phase: {phase_fn.__name__}")
+        ctx = phase_fn(ctx)
+
+    final = ctx.final_video_path or ctx.i2v_video_path
+    if not final:
+        raise RuntimeError("M5 local pipeline produced no output")
+    logger.info(f"[{ctx.job_id}] M5 local pipeline complete: {final}")
     return final
